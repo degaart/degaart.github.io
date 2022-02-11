@@ -1,11 +1,20 @@
 "use strict";
 
+let sack = Array();
+let lastChoice = -1;
+
 function onClick() {
     const resultDiv = document.getElementById("result-div");
 
+    let choice;
+    do {
+        choice = Math.floor(Math.random() * 3);
+    } while(choice == lastChoice);
+    lastChoice = choice;
+
     let img;
     let text;
-    switch(Math.floor(Math.random() * 3)) {
+    switch(choice) {
         case 0:
             img = "img/beer.jpg";
             text = "Oui, bière";
