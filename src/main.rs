@@ -142,7 +142,8 @@ fn main() -> Result<()> {
         articles: &articles
     };
     
-    let out_dir = PathBuf::from("public");
+    let out_dir = PathBuf::from("docs");
+    fs::create_dir_all(&out_dir)?;
 
     /* Clean out dir */
     clean_dir(&out_dir)?;
