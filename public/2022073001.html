@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Upgrade clang on old linux distributions</title>
+  <link href="css/main.css" rel="stylesheet">
+</head>
+<body>
+  <div class="navigation">
+    2022-07-30 |
+    <a href="index.html">back</a>
+  </div>
+
+  <h1>Upgrade clang on old linux distributions</h1>
+<h2>Introduction</h2>
+<p>If one is stuck on an old linux distribution, but needs a newer compiler, one possible solution is to compile clang manually. Note that clang is shipped with llvm, so we are going to build llvm.</p>
+<p>Also, building software on an old linux distribution is one of the way of creating portable software that can run on a variety of target systems. Your binary compiled on debian 8 will run on any system that has glibc &gt;= 2.19, like:</p>
+<ul>
+<li>debian &gt;= 8.0</li>
+<li>ubuntu &gt;= 14.10</li>
+<li>RHEL &gt;= 7.0</li>
+</ul>
+<p>In this post, we'll assume the target distribution is debian 8.0, which reached EOL on June 30, 2020. One can adapt the following instruction to older or different distributions. If one is on macOS, macports is a better alternative, as it's easier and faster than manually compiling clang.</p>
+<h2>Prerequisites</h2>
+<p>The target distribution ships with gcc 4.9.2, and <a href="https://releases.llvm.org/7.1.0/docs/GettingStarted.html#software">llvm 7.1.0</a> is the latest version that can be compiled with that compiler. Per the documentation, this is the required software for building it:</p>
+<ul>
+<li>make &gt;= 3.79</li>
+<li>gcc &gt;= 4.8.0</li>
+<li>python &gt;= 2.7</li>
+<li>zlib &gt;= 1.2.3.4</li>
+</ul>
+<p>Also, we'll use <a href="https://ninja-build.org/">ninja</a> instead of gnu make to speed up the build.</p>
+<p>So, we'll install the basic packages needed for building software:</p>
+<pre><code>apt-get install build-essential ninja-build python2.7
+</code></pre>
+<h2>Upgrade cmake</h2>
+<p>Llvm 7.1.0 requires cmake &gt;= 3.4.3, unfortunately debian 8 ships with cmake 3.0.2. So we need to upgrade cmake first.</p>
+<p>We'll use <code>$HOME/llvm</code> as a working directory:</p>
+<pre><code>mkdir -p ~/llvm
+cd ~/llvm
+</code></pre>
+<p>Then we download cmake's source code:</p>
+<pre><code># If using curl
+curl -LO 'https://github.com/Kitware/CMake/releases/download/v3.23.3/cmake-3.23.3.tar.gz'
+
+# If using wget
+wget 'https://github.com/Kitware/CMake/releases/download/v3.23.3/cmake-3.23.3.tar.gz'
+</code></pre>
+<p>And extract it:</p>
+<pre><code>tar xf cmake-3.23.3.tar.gz
+cd cmake-3.23.3
+</code></pre>
+<p>We are going to disable the use of openssl in our custom cmake build, because we don't need <code>fetch_content</code> and our target distribution ships with an outdated openssl anyway. So the build instructions are:</p>
+<pre><code>./bootstrap --parallel=$(nproc) --prefix=/usr/local -- -DCMAKE_USE_OPENSSL=OFF
+make -j$(nproc)
+sudo make install
+hash -r
+</code></pre>
+<p>Finally, clean the build directory because we don't need it anymore:</p>
+<pre><code>cd ~/llvm
+rm -r cmake-3.23.3
+</code></pre>
+<h2>Acquire source tarballs</h2>
+<p>Go to the <a href="https://releases.llvm.org/download.html#7.1.0">download page for the target version</a>, and download: LLVM source code, Clang source code, compiler-rt source code, libc++ source code, libc++abi source code, LLD Source code. We'll put everything in our working directory:</p>
+<pre><code>cd ~/llvm
+
+# If using curl
+curl -LO 'https://github.com/llvm/llvm-project/releases/download/llvmorg-7.1.0/llvm-7.1.0.src.tar.xz'
+curl -LO 'https://github.com/llvm/llvm-project/releases/download/llvmorg-7.1.0/cfe-7.1.0.src.tar.xz'
+curl -LO 'https://github.com/llvm/llvm-project/releases/download/llvmorg-7.1.0/clang-tools-extra-7.1.0.src.tar.xz'
+curl -LO 'https://github.com/llvm/llvm-project/releases/download/llvmorg-7.1.0/compiler-rt-7.1.0.src.tar.xz'
+curl -LO 'https://github.com/llvm/llvm-project/releases/download/llvmorg-7.1.0/libcxx-7.1.0.src.tar.xz'
+curl -LO 'https://github.com/llvm/llvm-project/releases/download/llvmorg-7.1.0/libcxxabi-7.1.0.src.tar.xz'
+curl -LO 'https://github.com/llvm/llvm-project/releases/download/llvmorg-7.1.0/lld-7.1.0.src.tar.xz'
+
+# If using wget
+wget 'https://github.com/llvm/llvm-project/releases/download/llvmorg-7.1.0/llvm-7.1.0.src.tar.xz'
+wget 'https://github.com/llvm/llvm-project/releases/download/llvmorg-7.1.0/cfe-7.1.0.src.tar.xz'
+wget 'https://github.com/llvm/llvm-project/releases/download/llvmorg-7.1.0/clang-tools-extra-7.1.0.src.tar.xz'
+wget 'https://github.com/llvm/llvm-project/releases/download/llvmorg-7.1.0/compiler-rt-7.1.0.src.tar.xz'
+wget 'https://github.com/llvm/llvm-project/releases/download/llvmorg-7.1.0/libcxx-7.1.0.src.tar.xz'
+wget 'https://github.com/llvm/llvm-project/releases/download/llvmorg-7.1.0/libcxxabi-7.1.0.src.tar.xz'
+wget 'https://github.com/llvm/llvm-project/releases/download/llvmorg-7.1.0/lld-7.1.0.src.tar.xz'
+</code></pre>
+<h2>Extract sources</h2>
+<p>This is straightforward, we just extract each tarball to the current directory:</p>
+<pre><code>for i in *.tar.xz; do tar xf &quot;$i&quot;; done
+</code></pre>
+<h2>Move sources into place</h2>
+<p>Llvm require each of its components to live in specific parts of the source tree, so it can detect them at build time and build them. So invoke the following commands to move them into place (adapt to your specific llvm version if needed):</p>
+<pre><code>mv cfe-7.1.0.src                llvm-7.1.0.src/tools/clang
+mv clang-tools-extra-7.1.0.src  llvm-7.1.0.src/tools/clang/tools/extra
+mv compiler-rt-7.1.0.src        llvm-7.1.0.src/projects/compiler-rt
+mv libcxx-7.1.0.src             llvm-7.1.0.src/projects/libcxx
+mv libcxxabi-7.1.0.src          llvm-7.1.0.src/projects/libcxxabi
+mv lld-7.1.0.src                llvm-7.1.0.src/tools/lld
+</code></pre>
+<h2>Build llvm</h2>
+<p>If the following, we are building llvm in Release mode, into <code>/usr/local</code>, using <code>./Build</code> as a build directory, using ninja as a build system, and we're going to disable building documentation, examples, and tests:</p>
+<pre><code>cd ~/llvm/llvm-7.1.0.src
+
+cmake \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr/local \
+    -B Build \
+    -G Ninja \
+    -DLLVM_INCLUDE_DOCS=OFF \
+    -DLLVM_INCLUDE_EXAMPLES=OFF \
+    -DLLVM_INCLUDE_TESTS=OFF \
+    .
+cmake --build Build
+sudo cmake --build Build --target install
+hash -r
+</code></pre>
+<p>If all goes well, llvm and clang should be installed into <code>/usr/local</code>. We can check that with the following commands:</p>
+<pre><code>llvm-config --version
+clang --version
+</code></pre>
+<p>We can also try compiling a small executable with clang to test whether it works fine:</p>
+<pre><code>printf &quot;#include&lt;stdio.h&gt;\nint main() {\nprintf(\&quot;It works\\\\n\&quot;);\nreturn 0;\n}\n&quot; &gt; /tmp/hello.c
+clang -o /tmp/hello /tmp/hello.c
+/tmp/hello
+rm /tmp/hello{,.c}
+</code></pre>
+<p>If the above printed <code>It works</code>, then the llvm installation has succeeded.</p>
+<p>But wait! there's more. We can also check whether llvm's C++ support was correctly installed and is working fine for compiling C++17 code:</p>
+<pre><code>cat &lt;&lt;EOF&gt;/tmp/hello17.cpp
+#include &lt;iostream&gt;
+int main() { std::cout &lt;&lt; u8&quot;C++17 works\n&quot;; return 0; }
+EOF
+clang++ -o /tmp/hello17 -std=gnu++17 -stdlib=libc++ /tmp/hello17.cpp
+/tmp/hello17
+rm /tmp/hello17{,.cpp}
+</code></pre>
+<p>If the above printed <code>C++17 works</code> then the clang++ installation is functional.</p>
+<p>Finally, we can clean our working directory because it's not needed anymore:</p>
+<pre><code>cd ~
+rm -r ~/llvm
+</code></pre>
+
+
+  <hr>
+  <div class="navigation">
+    2022-07-30 |
+    <a href="index.html">back</a>
+  </div>
+</body>
+</html>
+

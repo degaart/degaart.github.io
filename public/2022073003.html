@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Upgrade PHP on debian stable</title>
+  <link href="css/main.css" rel="stylesheet">
+</head>
+<body>
+  <div class="navigation">
+    2022-07-30 |
+    <a href="index.html">back</a>
+  </div>
+
+  <h1>Upgrade PHP on debian stable</h1>
+<pre><code>https://deb.sury.org/
+
+apt install apt-transport-https
+
+cat&lt;&lt;EOF&gt;/etc/apt/apt.conf.d/98sury
+Acquire::https::packages.sury.org::Verify-Peer &quot;false&quot;;
+Acquire::https::packages.sury.org::Verify-Host &quot;false&quot;;
+EOF
+
+echo &quot;deb https://packages.sury.org/php/ stretch main&quot; &gt;&gt; /etc/apt/sources.list
+curl -Lk https://packages.sury.org/php/apt.gpg|apt-key add -
+apt update
+</code></pre>
+
+
+  <hr>
+  <div class="navigation">
+    2022-07-30 |
+    <a href="index.html">back</a>
+  </div>
+</body>
+</html>
+
