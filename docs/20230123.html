@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>print! and println! in rust no_std</title>
+  <link href="css/main.css" rel="stylesheet">
+</head>
+<body>
+  <div class="navigation">
+    2023-01-23 |
+    <a href="index.html">back</a>
+  </div>
+
+  <h1>print! and println! in rust no_std</h1>
+<p>In the <a href="20230122.html">previous post</a>, we created a rust executable which
+didn't use std. It could write to stdout using a write_string() function, but
+if we tried to use <code>print!</code> or <code>println!</code> to print formatted strings, it
+wouldn't work:</p>
+<pre><code>error: cannot find macro `println` in this scope
+</code></pre>
+<p>We're gonna see next how to use these formatting macros work.</p>
+<h2>Initial code</h2>
+<p>We start with the following source code:</p>
+<pre><code>// src/main.rs
+
+#![no_std]
+#![no_main]
+
+extern &quot;C&quot; {
+    fn write(fildes: i32, buf: *const core::ffi::c_void, nbyte: usize);
+}
+
+#[panic_handler]
+fn panic(_info: &amp;core::panic::PanicInfo) -&gt; ! { 
+    loop {}
+}
+
+#[no_mangle]
+pub extern &quot;C&quot; fn main() -&gt; u32 {
+    let msg = b&quot;It works!\n&quot;;
+    unsafe {
+        write(1, msg.as_ptr() as *const core::ffi::c_void, msg.len());
+    }   
+    0
+}
+</code></pre>
+<h2>write_string</h2>
+<p>Having to define a binary string and an usafe block just to print a string is
+ugly, so we're going to create a function that takes a string and prints it to
+stdout</p>
+<pre><code>use core::ffi::c_void;
+
+fn write_string(s: &amp;str) {
+    unsafe {
+        write(1, s.as_ptr() as *const c_void, s.len());
+    }
+}
+</code></pre>
+<p>Nothing special there, it just takes what we've already done and wraps it
+inside a safe function. It also imports <code>core::ffi::c_void</code> because it's used
+several times in our source code.</p>
+<h2>Implementing a fmt::Write</h2>
+<p>Formatted output in rust uses the <code>fmt::Write</code> trait. Let's create a new struct
+that implements it</p>
+<pre><code>use core::fmt;
+
+pub struct Writer;
+
+impl fmt::Write for Writer {
+    fn write_str(&amp;mut self, s: &amp;str) -&gt; Result&lt;(), fmt::Error&gt; {
+        write_string(s);
+        Ok(())
+    }
+}
+</code></pre>
+<p>We can call it with the following:</p>
+<pre><code>use fmt::Write;
+Writer{}.write_str(&quot;It works!\n&quot;).unwrap();
+</code></pre>
+<p>We need to import <code>fmt::Write</code> because methods from traits needs to imported
+before use.</p>
+<p>Implementing <code>fmt::Write</code> is not just a convoluted way to output strings, it
+also enables the <code>Write::write_fmt</code> function which can be used for formatted
+output:</p>
+<pre><code>use fmt::Write;
+Writer{}.write_fmt(format_args!(&quot;It works\n&quot;)).unwrap();
+</code></pre>
+<p><code>Write::write_fmt</code> is declared as:</p>
+<pre><code>fn write_fmt(&amp;mut self, args: Arguments&lt;'_&gt;) -&gt; Result
+</code></pre>
+<p>The <code>format_args!</code> just takes a list of arguments and create an <code>Argument</code>
+struct out of them. More complicated formatting is possible thusly:</p>
+<pre><code>use fmt::Write;
+Writer{}.write_fmt(format_args!(&quot;{}\n&quot;, &quot;It works&quot;)).unwrap();
+</code></pre>
+<h2>Simplifying formatted output using a print function</h2>
+<p>We can simplify this code further by creating a function that creates a
+temporary writer and writes to it:</p>
+<pre><code>fn print(args: fmt::Arguments) {
+    use fmt::Write;
+    Writer{}.write_fmt(args).unwrap();
+}
+</code></pre>
+<p>Our formatted output call can then be simplified to:</p>
+<pre><code>print(format_args!(&quot;{}!\n&quot;, &quot;It works&quot;));
+</code></pre>
+<h2>print! and println!</h2>
+<p>We can forego the usage of <code>format_args</code> by defining a macro that calls it for
+us:</p>
+<pre><code>macro_rules! print {
+    ($($arg:tt)*) =&gt; {{
+        print(format_args!($($arg)*));
+    }}
+}
+</code></pre>
+<p>This macro forwards its arguments to <code>format_args</code>, and calls <code>print</code>,
+simplifying our earlier call to:</p>
+<pre><code>print!(&quot;{}!\n&quot;, &quot;It works&quot;);
+</code></pre>
+<p>And we can now implement a <code>println!</code> macro by using <code>print</code>:</p>
+<pre><code>macro_rules! println {
+    () =&gt; {{
+        print!(&quot;\n&quot;);
+    }};
+    
+    ($($arg:tt)*) =&gt; {{
+        print!(&quot;{}\n&quot;, format_args!($($arg)*));
+    }}
+}
+</code></pre>
+<p>At the call site:</p>
+<pre><code>println!(&quot;{}!&quot;, &quot;It works&quot;);
+</code></pre>
+<h2>Reusable output printing functions</h2>
+<p>All our printing functions are defined in the same file for now, let's put them
+in a separate file so they can be reused in other modules and source files.</p>
+<p>Copy all our formatted output functions in a new <code>src/print.rs</code> file, and fix
+imports:</p>
+<pre><code>// src/print.rs
+use core::ffi::c_void;
+use core::fmt;
+
+extern &quot;C&quot; {
+    fn write(fildes: i32, buf: *const c_void, nbyte: usize);
+}
+
+pub fn write_string(s: &amp;str) {
+    unsafe {
+        write(1, s.as_ptr() as *const c_void, s.len());
+    }
+}
+
+pub struct Writer;
+
+impl fmt::Write for Writer {
+    fn write_str(&amp;mut self, s: &amp;str) -&gt; Result&lt;(), fmt::Error&gt; {
+        write_string(s);
+        Ok(())
+    }
+}
+
+pub fn print(args: fmt::Arguments) {
+    use fmt::Write;
+    Writer{}.write_fmt(args).unwrap();
+}
+
+macro_rules! print {
+    ($($arg:tt)*) =&gt; {{
+        print(format_args!($($arg)*));
+    }}
+}
+
+macro_rules! println {
+    () =&gt; {{
+        print!(&quot;\n&quot;);
+    }};
+
+    ($($arg:tt)*) =&gt; {{
+        print!(&quot;{}\n&quot;, format_args!($($arg)*));
+    }}
+}
+</code></pre>
+<p>Back into <code>src/main.rs</code>, we can get rid of the imports, and we need to import
+the <code>print</code> module:</p>
+<pre><code>// src/main.rs
+
+#![no_std]
+#![no_main]
+
+mod print;
+
+#[panic_handler]
+fn panic(_info: &amp;core::panic::PanicInfo) -&gt; ! {
+    loop {}
+}   
+
+#[no_mangle]
+pub extern &quot;C&quot; fn main() -&gt; u32 {
+    println!(&quot;{}!&quot;, &quot;It works&quot;);
+    0
+}
+</code></pre>
+<p>We're greeted with this lovely compile error:</p>
+<pre><code>error: cannot find macro `println` in this scope
+</code></pre>
+<p>That's because we didn't export our macros. We need to annotate <code>print!</code> and
+<code>println!</code> with <code>#[macro_export]</code>. That will make the macros exportable and put
+them at the crate root:</p>
+<pre><code>// src/print.rs
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) =&gt; {{
+        print(format_args!($($arg)*));
+    }}
+}
+
+#[macro_export]
+macro_rules! println {
+    () =&gt; {{
+        print!(&quot;\n&quot;);
+    }};
+
+    ($($arg:tt)*) =&gt; {{
+        print!(&quot;{}\n&quot;, format_args!($($arg)*));
+    }}
+}
+</code></pre>
+<p>We get the following error:</p>
+<pre><code>error[E0423]: expected function, found module `print`
+  --&gt; src/print.rs:31:9
+   |
+31 |         print(format_args!($($arg)*));
+   |         ^^^^^ not a function
+</code></pre>
+<p>That's because back at <code>main.rs</code>, the println! macro was expanded, and it
+contains a call to the <code>print</code> functions, which is not defined in main.rs but
+in print.rs. We need make the macro expand to the full path to the <code>print</code>
+function.</p>
+<pre><code>#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) =&gt; {{
+        $crate::print::print(format_args!($($arg)*));
+    }}
+}
+</code></pre>
+<p><code>$crate</code> is expanded to the current crate, so our macro can be called from
+other crates.</p>
+<p>Our program now compiles and run without error.</p>
+<p>However, if we remove the <code>println!</code> invocation in main, the compiler
+complains:</p>
+<pre><code>warning: function `print` is never used
+</code></pre>
+<p>So we need annotate our print function <code>#[allow(unused)]</code>.</p>
+<pre><code>#[allow(unused)]
+pub fn print(args: fmt::Arguments) {
+    use fmt::Write;
+    Writer{}.write_fmt(args).unwrap();
+}
+</code></pre>
+<h2>Exiting with an error code</h2>
+<p>Until now, our panic handler just enters an infinite loop. So if we had the
+following in main.rs, we wouldn't be able to know if there's a panic, yet alone
+read the error message from the panic call.</p>
+<pre><code>panic!(&quot;Someone set us the bomb!&quot;);
+</code></pre>
+<p>To solve this, we first need to make our executable exit with an error code.
+That's accomplished by calling the libc function <code>exit</code>. We declare it thusly:</p>
+<pre><code>extern &quot;C&quot; {
+    fn exit(status: i32) -&gt; !;
+}
+</code></pre>
+<p>It's a function that never returns, so we can make it return the never type.</p>
+<p>Now our panic handler becomes:</p>
+<pre><code>#[panic_handler]
+fn panic(_info: &amp;core::panic::PanicInfo) -&gt; ! {
+    unsafe {
+        exit(1);
+    }
+}
+</code></pre>
+<p>When we run our program, it exits with a status code of 1.</p>
+<h2>Implementing panic messages</h2>
+<p>The <code>core::panic::PanicInfo</code> conveniently implements <code>core::fmt::Display</code>, so
+it can be formatted:</p>
+<pre><code>#[panic_handler]
+fn panic(info: &amp;core::panic::PanicInfo) -&gt; ! {
+    println!(&quot;{}&quot;, info);
+    unsafe {
+        exit(1);
+    }
+}
+</code></pre>
+<p>Which gives us a nice panic message when ran:</p>
+<pre><code>panicked at 'Somebody set us the bomb', src/main.rs:21:5
+</code></pre>
+<h2>Putting it all together</h2>
+<h3>src/main.rs</h3>
+<pre><code>// src/main.rs
+#![no_std]
+#![no_main]
+
+mod print; 
+
+extern &quot;C&quot; {
+    fn exit(status: i32) -&gt; !;
+}
+    
+#[panic_handler]
+fn panic(info: &amp;core::panic::PanicInfo) -&gt; ! {
+    println!(&quot;{}&quot;, info);
+    unsafe {
+        exit(1);
+    }
+}
+
+#[no_mangle]
+pub extern &quot;C&quot; fn main() -&gt; u32 {
+    panic!(&quot;Somebody set us the bomb&quot;);
+    0
+}
+</code></pre>
+<h3>src/print.rs</h3>
+<pre><code>// src/print.rs
+use core::ffi::c_void;
+use core::fmt;
+
+extern &quot;C&quot; {
+    fn write(fildes: i32, buf: *const c_void, nbyte: usize);
+}
+
+pub fn write_string(s: &amp;str) {
+    unsafe {
+        write(1, s.as_ptr() as *const c_void, s.len());
+    }
+}
+
+pub struct Writer;
+
+impl fmt::Write for Writer {
+    fn write_str(&amp;mut self, s: &amp;str) -&gt; Result&lt;(), fmt::Error&gt; {
+        write_string(s);
+        Ok(())
+    }
+}
+
+#[allow(unused)]
+pub fn print(args: fmt::Arguments) {
+    use fmt::Write;
+    Writer{}.write_fmt(args).unwrap();
+}
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) =&gt; {{
+        $crate::print::print(format_args!($($arg)*));
+    }}
+}
+
+#[macro_export]
+macro_rules! println {
+    () =&gt; {{
+        print!(&quot;\n&quot;);
+    }};
+
+    ($($arg:tt)*) =&gt; {{
+        print!(&quot;{}\n&quot;, format_args!($($arg)*));
+    }}
+}
+</code></pre>
+
+
+  <hr>
+  <div class="navigation">
+    2023-01-23 |
+    <a href="index.html">back</a>
+  </div>
+
+  <!-- Matomo Image Tracker-->
+  <img referrerpolicy="no-referrer-when-downgrade" src="https://analytics.zorro.ovh/matomo.php?idsite=2&amp;rec=1" style="border:0" alt="" />
+  <!-- End Matomo -->
+
+</body>
+</html>
+

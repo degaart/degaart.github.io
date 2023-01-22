@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How to create a no_std rust binary</title>
+  <link href="css/main.css" rel="stylesheet">
+</head>
+<body>
+  <div class="navigation">
+    2023-01-22 |
+    <a href="index.html">back</a>
+  </div>
+
+  <h1>How to create a no_std rust binary</h1>
+<p>A no_std rust binary is an executable that does not link to the rust standard
+library.</p>
+<h2>Create the project</h2>
+<pre><code>cargo new --bin nostd
+</code></pre>
+<h2>Avoid linking to std</h2>
+<p>To tell the compiler that we don't need to stinking std, we need to add
+<code>[no_std]</code> at the top of our main file</p>
+<pre><code>// src/main.rs
+#![no_std]
+
+fn main() {
+    println!(&quot;Hello, world!&quot;);
+}
+</code></pre>
+<p>Now, if we try to build the project with <code>cargo build</code>, we'll get a bunch of
+errors.</p>
+<h2>println</h2>
+<pre><code>error: cannot find macro `println` in this scope
+</code></pre>
+<p>The first is about <code>println</code>, which we can get around by removing it from our
+code</p>
+<pre><code>// src/main.rs
+#![no_std]
+
+fn main() {
+}
+</code></pre>
+<h2>panic_handler</h2>
+<pre><code>error: `#[panic_handler]` function required, but not found
+</code></pre>
+<p>The second is about <code>panic_handler</code>. To get around this error, we're gonna
+define a function that we will annotate as a panic handler</p>
+<pre><code>// src/main.rs
+#![no_std]
+
+#[panic_handler]
+fn panic(_info: &amp;core::panic::PanicInfo) -&gt; ! {
+    loop {}
+}
+
+fn main() {
+}
+</code></pre>
+<p>The panic function's return type is <code>!</code> because it's
+<a href="https://stackoverflow.com/questions/31082098/why-would-i-use-divergent-functions">a function that never returns.</a>,
+moreover, the compiler will warns us about this if we don't specify <code>!</code> as its
+return type.</p>
+<h2>eh_personality</h2>
+<pre><code>error: language item required, but not found: `eh_personality`
+</code></pre>
+<p><code>eh_personality</code> is a <a href="https://doc.rust-lang.org/unstable-book/language-features/lang-items.html#more-about-the-language-items">language item</a>
+that is used by the compiler for stack unwinding and general failure. We do not
+support stack unwinding for now, so we'll just tell the compiler to abort on
+failure. To do so, create a <code>.cargo</code> directory inside our project, then create
+a <code>config.toml</code> file inside it</p>
+<pre><code># .cargo/config.toml
+
+[profile.dev]
+panic = &quot;abort&quot;
+
+[profile.release]
+panic = &quot;abort&quot;
+</code></pre>
+<h2>start language item</h2>
+<pre><code>error: requires `start` lang_item
+</code></pre>
+<p>This means the compiler cannot find the entry point of our program. How come?
+We've defined <code>main</code>, ain't it? Well, turns out <code>main</code> is not the real entry
+point of programs, the rust standard library sets up some required magic
+before handing control to us. This magic should happen in the start language
+item. For that, we could change the arguments of <code>main</code> and annotate it with
+<code>#[start]</code></p>
+<pre><code>// src/main.rs
+#![no_std]
+
+#[panic_handler]
+fn panic(_info: &amp;core::panic::PanicInfo) -&gt; ! {
+    loop {}
+}
+
+#[start]
+fn main(argc: isize, argv: *const *const u8) -&gt; isize {
+    0
+}
+</code></pre>
+<p>If we do that however, the compiler will complain that it's an experimental
+feature, and we would need to use the nightly toolchain. We do not want to use
+the nightly toolchain, however.</p>
+<p>To get around this error, we're gonna add <code>#![no_main]</code> to our source file to
+tell the compiler to shut up about <code>main</code></p>
+<pre><code>// src/main.rs
+#![no_std]
+#![no_main]
+
+#[panic_handler]
+fn panic(_info: &amp;core::panic::PanicInfo) -&gt; ! {
+    loop {}
+}
+</code></pre>
+<p>But now, it's the linker that complains it can't find a <code>_main</code> symbol:</p>
+<pre><code>note: ld: entry point (_main) undefined. for architecture arm64
+</code></pre>
+<p>It's libc that wants to call the program's entry point (main). No problem, we
+just have to create a function called main, disable name mangling, and give it
+C linkage</p>
+<pre><code>// src/main.rs
+#![no_std]
+#![no_main]
+
+#[panic_handler]
+fn panic(_info: &amp;core::panic::PanicInfo) -&gt; ! {
+    loop {}
+}
+
+#[no_mangle]
+pub extern &quot;C&quot; fn main() -&gt; ! {
+    loop {}
+}
+</code></pre>
+<p>On macOS however, every executable needs to link to libSystem.dylib, so we also
+have to tweak <code>.cargo/config.toml</code></p>
+<pre><code># .cargo/config.toml
+
+[profile.dev]
+panic = &quot;abort&quot;
+
+[profile.release]
+panic = &quot;abort&quot;
+
+[target.'cfg(target_os = &quot;macos&quot;)']
+rustflags = [&quot;-C&quot;, &quot;link-args=-lSystem&quot;]
+</code></pre>
+<h2>Printing to stdout</h2>
+<p>If we run the executable with <code>cargo run</code>, it just hangs indefinitely, because
+<code>main</code> only contains an infinite loop. We need to make it do something so we
+can be sure it really works, for that, we're gonna print a string to stdout.
+Printing a string to stdout is writing a string to file descriptor number 1.
+Writing to a file descriptor is calling the <code>write</code> libc function, which is
+defined as:</p>
+<pre><code>ssize_t write(int fildes, const void *buf, size_t nbyte);
+</code></pre>
+<p>To call a C function from rust, we need to define it inside an <code>extern &quot;C&quot;</code>
+block, and convert it's definition to rust syntax</p>
+<pre><code>extern &quot;C&quot; {
+    fn write(fildes: i32, buf: *const core::ffi::c_void, nbyte: usize);
+}
+</code></pre>
+<p>To call it from rust, it must be inside an unsafe block:</p>
+<pre><code>let msg = b&quot;It works!\n&quot;;
+unsafe {
+    write(1, msg.as_ptr() as *const core::ffi::c_void, msg.len());
+}
+</code></pre>
+<p>And now that it does something, we could also just return a value from main
+instead of looping indefinitely.</p>
+<h2>Final program</h2>
+<p>Putting it all together:</p>
+<pre><code>// src/main.rs
+#![no_std]
+#![no_main]
+
+extern &quot;C&quot; {
+    fn write(fildes: i32, buf: *const core::ffi::c_void, nbyte: usize);
+}
+
+#[panic_handler]
+fn panic(_info: &amp;core::panic::PanicInfo) -&gt; ! { 
+    loop {}
+}
+
+#[no_mangle]
+pub extern &quot;C&quot; fn main() -&gt; u32 {
+    let msg = b&quot;It works!\n&quot;;
+    unsafe {
+        write(1, msg.as_ptr() as *const core::ffi::c_void, msg.len());
+    }   
+    0
+}
+</code></pre>
+<p>If we run this program, it will print <code>It works</code> to stdout, and exit with a
+status code of <code>0</code></p>
+
+
+  <hr>
+  <div class="navigation">
+    2023-01-22 |
+    <a href="index.html">back</a>
+  </div>
+
+  <!-- Matomo Image Tracker-->
+  <img referrerpolicy="no-referrer-when-downgrade" src="https://analytics.zorro.ovh/matomo.php?idsite=2&amp;rec=1" style="border:0" alt="" />
+  <!-- End Matomo -->
+
+</body>
+</html>
+
