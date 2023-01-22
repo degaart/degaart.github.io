@@ -131,7 +131,7 @@ fn main() -> Result<()> {
     }
 
     /* Sort articles by filename */
-    articles.sort_by(|a, b| { a.filename.cmp(&b.filename) });
+    articles.sort_by(|a, b| { b.filename.cmp(&a.filename) });
 
     /* Render index */
     let index_template = load_file("template/index.html")?;
